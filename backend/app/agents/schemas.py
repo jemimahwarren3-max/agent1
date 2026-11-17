@@ -59,3 +59,11 @@ class GeneratedEmail(BaseModel):
         description="one of: general_introduction, website_development, ai_automation, "
         "ai_customer_support, workflow_automation, custom_software, industry_specific, follow_up"
     )
+
+
+class ReplyClassificationResult(BaseModel):
+    classification: str = Field(
+        description="one of: interested, requesting_info, wants_meeting, not_interested, "
+        "out_of_office, unsubscribe, other"
+    )
+    summary: str = Field(description="One sentence summarizing what the reply actually said")

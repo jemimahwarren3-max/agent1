@@ -1,7 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import agent_actions, auth, campaigns, company_profile, discovery, health, leads
+from app.api import (
+    agent_actions,
+    auth,
+    campaigns,
+    company_profile,
+    discovery,
+    email_queue,
+    followups,
+    health,
+    integrations,
+    leads,
+    replies,
+    templates,
+)
 from app.core.config import settings
 
 app = FastAPI(title="Haki Systems Prospecting Platform", version="0.1.0")
@@ -21,3 +34,8 @@ app.include_router(leads.router)
 app.include_router(agent_actions.router)
 app.include_router(campaigns.router)
 app.include_router(discovery.router)
+app.include_router(templates.router)
+app.include_router(integrations.router)
+app.include_router(email_queue.router)
+app.include_router(followups.router)
+app.include_router(replies.router)

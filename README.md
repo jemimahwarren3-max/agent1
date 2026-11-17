@@ -1,16 +1,18 @@
 # Haki Systems AI Prospecting & Outreach Platform
 
-Status: **Phase 2 — ADK agents + Crawl4AI + Gemini wired in (on top of Phase 1's schema/auth).**
-See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the full phase breakdown and
-what is / isn't built yet.
+Status: **Phase 4 — Gmail OAuth, sending, reply monitoring, and follow-up agents wired in
+(on top of Phases 1-3's schema/auth/agents/discovery).** See
+[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the full phase breakdown and what
+is / isn't built yet.
 
 ## Stack
 
 - Backend: FastAPI + SQLAlchemy + Alembic + PostgreSQL + Redis
 - Frontend: Next.js (App Router) + TypeScript + Tailwind CSS
-- AI: Google ADK + Gemini (wired in Phase 3)
-- Scraping: Crawl4AI (wired in Phase 3/4)
-- Google Workspace: Gmail / Sheets / Drive via OAuth 2.0 (wired in Phase 5)
+- AI: Google ADK + Gemini
+- Scraping: Crawl4AI
+- Google Workspace: Gmail / Sheets / Drive via OAuth 2.0 (Gmail send + reply monitoring wired in
+  Phase 4; Sheets/Drive scopes requested but not yet used by any feature)
 
 ## What works right now
 
@@ -32,18 +34,26 @@ what is / isn't built yet.
 - Minimal campaign CRUD (`/api/campaigns`) so drafted emails have a campaign to belong to.
 - Next.js dashboard shell with the 12-section navigation from the spec, a working login page,
   and a working Lead Database page reading real data from Postgres
-- Automated tests: 34 passing in `backend/tests/`. DB-backed tests run against a **real** Postgres
-  (embedded via the `pgserver` dev dependency when Docker isn't available). Agent builders and the
-  research→qualify→draft pipeline are tested with mocked I/O so no live Gemini key is needed.
+- **Google OAuth** (`/integrations`) for Gmail/Sheets/Drive — encrypted token storage, automatic
+  refresh. **Gmail sending**: an approved `EmailQueueItem` is sent for real and logged
+  (`EmailLog`), scheduling a `FollowUpTask`. **Reply monitoring**: the Email Management Agent
+  classifies new replies on a connected campaign's threads (`/inbox`, `POST
+  /api/campaigns/{id}/sync-replies`), updates lead status, and auto-suppresses unsubscribe
+  requests. **Follow-up Agent** drafts a follow-up for a due task through the same
+  approve/send path. **Email Templates** CRUD + editor UI at `/templates`.
+- Automated tests: 80 passing in `backend/tests/`. DB-backed tests run against a **real** Postgres
+  (embedded via the `pgserver` dev dependency when Docker isn't available). Agent builders, the
+  research→qualify→draft pipeline, and the new Gmail/OAuth/reply-monitoring/follow-up services are
+  tested with mocked I/O (no live Gemini key or Google account needed to run the suite).
 
 ## What's explicitly NOT built yet
 
-Background/at-scale discovery jobs (pause/resume), the Discover/Research/Templates/Approval UIs,
-Gmail/Sheets/Drive OAuth and actual email sending, the Email Management + Follow-up agents,
-campaign execution, role-based permissions, and analytics. Agent calls require a real
-`GEMINI_API_KEY`; without one the endpoints return a clear 503 rather than fabricating data
-(the brief prohibits fake functionality). See
-[docs/GOOGLE_CLOUD_SETUP.md](docs/GOOGLE_CLOUD_SETUP.md) to provision the credentials.
+The polished campaign builder and approval-queue UIs, suppression-list enforcement wired into
+every mutation, rate limiting, role-based permissions, audit logging, and analytics (Phase 5-7).
+Agent calls require a real `GEMINI_API_KEY`; without one the endpoints return a clear 503 rather
+than fabricating data (the brief prohibits fake functionality). Gmail/reply features require a
+Google account actually connected via `/integrations`, which needs a real OAuth client. See
+[docs/GOOGLE_CLOUD_SETUP.md](docs/GOOGLE_CLOUD_SETUP.md) to provision both.
 
 ## Running locally
 

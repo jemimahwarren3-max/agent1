@@ -8,7 +8,7 @@ on — the brief is explicit that a phase isn't "done" until that happens.
 | 1 | Repo scaffold, Postgres schema + Alembic migrations, FastAPI skeleton, JWT auth, Next.js shell with nav | **Done** |
 | 2 | Google ADK agents (Discovery, Research, Qualification, Email Generation, Supervisor), Crawl4AI integration, Gemini wiring, agent-run logging, single-lead research/qualify/draft-email endpoints | **Done** |
 | 3 | Background discovery jobs (full discover→research→qualify pipeline) with pause/resume/cancel and domain dedup, discovery REST API, Discover Leads UI with live progress, Research Centre UI | **Done** |
-| 4 | Email template editor UI, Google OAuth (Gmail/Sheets/Drive), encrypted token storage, Gmail send/draft/reply monitoring, Email Management + Follow-up Agents | Not started |
+| 4 | Email template editor UI, Google OAuth (Gmail/Sheets/Drive), encrypted token storage, Gmail send/draft/reply monitoring, Email Management + Follow-up Agents | **Done** |
 | 5 | Campaign builder UI, approval queue UI, suppression-list enforcement end-to-end, rate limiting, role-based permissions, audit logging wired into every mutation | Not started |
 | 6 | Analytics dashboard wired to real DB aggregates, Recharts visualizations | Not started |
 | 7 | Full Playwright/Vitest coverage for the frontend, Cloud Run deployment config, production security checklist | Not started |
@@ -57,6 +57,43 @@ on — the brief is explicit that a phase isn't "done" until that happens.
   the API process via BackgroundTasks. A real queue/worker (Celery+Redis, already in requirements)
   with a global concurrency cap is a Phase 5+ hardening step; the `enqueue`-shaped seam is in place.
 
+## Phase 4 notes
+
+- Google OAuth (`app/services/google_oauth.py`, `app/api/integrations.py`): the authorize step is
+  a normal JWT-authenticated endpoint; the callback is not, since Google redirects the browser
+  straight to it with no Authorization header. A short-lived signed `state` token
+  (`create_oauth_state_token` / `decode_oauth_state_token` in `app/core/security.py`) carries the
+  organisation id across that gap. Tokens are encrypted at rest via the existing `app/core/crypto.py`
+  Fernet helper and refreshed transparently in `app/services/integration_credentials.py`, which
+  re-encrypts and persists whatever Google hands back after a refresh.
+- Gmail (`app/services/gmail_service.py`): thin wrapper over `googleapiclient` — send, read a
+  thread's messages, extract plain-text body, and tell our own sent messages apart from replies.
+  `app/services/email_sender.py` glues this to the DB: sends an **approved** `EmailQueueItem`,
+  logs the Gmail message/thread id to `EmailLog`, updates the lead, and schedules the next
+  `FollowUpTask` based on the campaign's `follow_up_interval_days`.
+- Approve/reject/send endpoints (`app/api/email_queue.py`) exist now because Phase 4's Gmail
+  sending needs something to drive the `AWAITING_APPROVAL -> APPROVED -> SENT` transition — the
+  polished approval-queue UI itself is still Phase 5.
+- Email Management Agent (`app/agents/reply_classification_agent.py`) classifies each new reply
+  into interested/requesting_info/wants_meeting/not_interested/out_of_office/unsubscribe/other.
+  `app/services/reply_monitor.py` polls Gmail threads for sent campaign emails, classifies replies
+  not already seen (keyed by Gmail message id), updates the lead's status, cancels pending
+  follow-ups on a real reply, and adds an unsubscribe reply straight to the suppression list.
+  There's no scheduler yet — sync is triggered on demand via
+  `POST /api/campaigns/{id}/sync-replies`, same BackgroundTasks-only limitation noted in Phase 3.
+- Follow-up Agent (`app/agents/followup_agent.py`) drafts a short follow-up email reusing the
+  `GeneratedEmail` schema; `app/services/followup_service.py` turns a due, non-cancelled
+  `FollowUpTask` into a new `AWAITING_APPROVAL` queue item through the normal approval/send path.
+- Email Templates CRUD (`app/api/templates.py`) and its frontend editor at `/templates` — the
+  actual re-use of an approved template as a starting point for an agent draft is not wired in
+  yet (the email/followup agents still generate from scratch each time).
+- Frontend: `/templates` (create/edit/approve/delete), `/integrations` (connect/disconnect Google,
+  shows connected account + granted scopes), `/inbox` (lists classified replies, a "check for
+  replies" button per campaign).
+- `google-auth` had to move from the `==2.35.0` pin to `==2.62.2` — `google-adk` 2.11.0 and
+  `google-genai` 2.33.0 both need `google-auth>=2.47`/`>=2.56` respectively, which the original
+  pin predates. Verified the existing agent-builder tests still pass after the bump.
+
 ## Why Phase 1 stopped where it did
 
 The master prompt itself warns against generating all phases in one pass — "that will save you
@@ -80,3 +117,14 @@ now: the data model, auth, the editable company profile, and the dashboard shell
    skip.
 3. Decide on a search provider for lead discovery (Google Programmable Search Engine is the
    default assumption; Bing/SerpAPI are viable swaps behind the same abstraction).
+
+## What to do before Phase 5
+
+Phase 4's code is real and tested (mocked Gmail/OAuth, real Postgres), but nothing in it has run
+against a live Google account yet — that needs the OAuth client from
+[GOOGLE_CLOUD_SETUP.md](GOOGLE_CLOUD_SETUP.md) provisioned and a real end-to-end click-through:
+connect a Google account on `/integrations`, send an approved email, reply to it from another
+inbox, and confirm `/inbox` picks up and classifies that reply. Phase 5 (campaign builder,
+approval queue UI, suppression enforcement, RBAC, audit logging) builds UI on top of the
+email-queue/follow-up endpoints Phase 4 added, so getting a real send/reply loop verified first
+will surface any Gmail-specific edge case before more UI gets built on top of it.
