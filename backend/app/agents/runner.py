@@ -10,6 +10,11 @@ from google.genai import types
 
 APP_NAME = "haki-prospecting"
 
+# Re-exported for convenience — see `app.agents.registry` for the canonical map.
+from app.agents.registry import AGENT_BUILDERS, build_agent_by_name  # noqa: E402
+
+__all__ = ["run_agent", "AgentRunError", "AGENT_BUILDERS", "build_agent_by_name"]
+
 
 class AgentRunError(RuntimeError):
     pass

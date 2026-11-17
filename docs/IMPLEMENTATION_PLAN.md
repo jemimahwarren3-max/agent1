@@ -19,7 +19,8 @@ on — the brief is explicit that a phase isn't "done" until that happens.
 
 - Every agent is a real `google.adk.Agent` (ADK 2.11.0) with a Pydantic `output_schema`, built
   and unit-tested against the actual library (not just assumed) — `backend/tests/test_agent_builders.py`
-  constructs all five and checks their tool/sub-agent wiring.
+  constructs all seven and checks their tool/sub-agent wiring (`app/agents/registry.py` maps names
+  to factories).
 - Research and Discovery agents call real tools: `crawl_page` (Crawl4AI, `check_robots_txt=True`)
   and `web_search` (Google Custom Search JSON API, behind a swappable `SearchProvider` interface).
   Both are unit-tested with mocked I/O.

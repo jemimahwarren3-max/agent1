@@ -6,6 +6,7 @@ from app.agents.schemas import (
     DiscoveryResult,
     GeneratedEmail,
     LeadScoreResult,
+    ReplyClassificationResult,
     ResearchExtraction,
     SourcedField,
 )
@@ -56,3 +57,11 @@ def test_generated_email_schema():
         template_category="website_development",
     )
     assert email.template_category == "website_development"
+
+
+def test_reply_classification_result_schema():
+    result = ReplyClassificationResult(
+        classification="interested",
+        summary="They asked for a pricing sheet.",
+    )
+    assert result.classification == "interested"

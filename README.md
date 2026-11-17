@@ -22,10 +22,10 @@ is / isn't built yet.
 - Lead CRUD with suppression-list checking (`/api/leads/*`)
 - Full relational schema (21 tables) for leads, campaigns, email queue/logs, agent runs, audit
   logs, OAuth token storage (encrypted at rest), etc. — see `backend/app/models/`
-- **Five Google ADK agents** (`backend/app/agents/`): Discovery (web search via a swappable
-  `SearchProvider`), Research (Crawl4AI with `check_robots_txt=True`), Qualification, Email
-  Generation, and a Supervisor that wires the other four as sub-agents. Each uses a Gemini model
-  and a Pydantic `output_schema` for validated JSON output.
+- **Seven Google ADK agents** (`backend/app/agents/`, registry in `registry.py`): Discovery, Research,
+  Qualification, Email Generation, Supervisor (wires the first four), **Email Management** (reply
+  classification), and **Follow-up** (second-touch drafts). Each uses a Gemini model and a Pydantic
+  `output_schema` for validated JSON output.
 - **Agent-action endpoints** that run a single agent and persist its output:
   `POST /api/leads/{id}/research`, `/qualify`, `/draft-email` — each logged to `agent_runs` /
   `agent_execution_logs`. Research records a `LeadSource` (source URL) for every contact detail
