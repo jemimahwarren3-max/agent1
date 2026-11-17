@@ -1,0 +1,3 @@
+# Dev/test-only — not installed in the production Docker image.
+-r requirements.txt
+pgserver==0.1.4
