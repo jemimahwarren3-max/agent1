@@ -22,7 +22,7 @@ Write a one-sentence summary of what the reply actually said — do not invent d
 in the text."""
 
 
-def build_reply_classification_agent() -> Agent:
+def build_email_management_agent() -> Agent:
     return Agent(
         name="email_management_agent",
         description="Classifies a lead's reply to an outreach email.",
@@ -31,3 +31,7 @@ def build_reply_classification_agent() -> Agent:
         output_schema=ReplyClassificationResult,
         mode="single_turn",
     )
+
+
+# Kept for backwards compatibility with earlier imports in this branch.
+build_reply_classification_agent = build_email_management_agent
