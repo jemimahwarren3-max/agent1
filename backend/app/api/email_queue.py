@@ -7,15 +7,18 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.campaigns import Campaign, EmailQueueItem, EmailQueueStatus
-from app.models.core import User
+from app.models.core import User, UserRole
 from app.schemas.agent_actions import EmailQueueItemResponse
 from app.schemas.email_queue import EmailLogResponse, RejectEmailRequest
+from app.services.audit import log_action
 from app.services.email_sender import EmailSendError, send_queued_email
 
 router = APIRouter(prefix="/api/email-queue", tags=["email-queue"])
+
+_MANAGE = require_role(UserRole.ADMIN, UserRole.MANAGER)
 
 
 def _get_owned_item(item_id: uuid.UUID, user: User, db: Session) -> EmailQueueItem:
@@ -49,7 +52,7 @@ def list_email_queue(
 @router.post("/{item_id}/approve", response_model=EmailQueueItemResponse)
 def approve_email(
     item_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
     item = _get_owned_item(item_id, current_user, db)
@@ -59,6 +62,8 @@ def approve_email(
     item.reviewed_by_user_id = current_user.id
     db.commit()
     db.refresh(item)
+
+    log_action(db, current_user.organisation_id, current_user.id, "approve", "email_queue_item", str(item.id))
     return item
 
 
@@ -66,7 +71,7 @@ def approve_email(
 def reject_email(
     item_id: uuid.UUID,
     payload: RejectEmailRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
     item = _get_owned_item(item_id, current_user, db)
@@ -77,17 +82,30 @@ def reject_email(
     item.rejection_reason = payload.reason
     db.commit()
     db.refresh(item)
+
+    log_action(
+        db,
+        current_user.organisation_id,
+        current_user.id,
+        "reject",
+        "email_queue_item",
+        str(item.id),
+        {"reason": payload.reason},
+    )
     return item
 
 
 @router.post("/{item_id}/send", response_model=EmailLogResponse)
 def send_email(
     item_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
     item = _get_owned_item(item_id, current_user, db)
     try:
-        return send_queued_email(db, item)
+        log = send_queued_email(db, item)
     except EmailSendError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    log_action(db, current_user.organisation_id, current_user.id, "send", "email_queue_item", str(item.id))
+    return log

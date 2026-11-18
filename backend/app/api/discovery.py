@@ -3,14 +3,17 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_role
 from app.db.session import get_db
-from app.models.core import User
+from app.models.core import User, UserRole
 from app.models.jobs import JobStatus, ScrapingJob
 from app.schemas.discovery import DiscoveryJobResponse, DiscoveryStartRequest
+from app.services.audit import log_action
 from app.services.discovery_job import run_discovery_job_sync
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
+
+_MANAGE = require_role(UserRole.ADMIN, UserRole.MANAGER)
 
 
 def _get_owned_job(job_id: uuid.UUID, user: User, db: Session) -> ScrapingJob:
@@ -28,7 +31,7 @@ def _get_owned_job(job_id: uuid.UUID, user: User, db: Session) -> ScrapingJob:
 def start_discovery(
     payload: DiscoveryStartRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
     search_params = payload.model_dump(mode="json", exclude_none=True)
@@ -45,6 +48,7 @@ def start_discovery(
     db.refresh(job)
 
     background_tasks.add_task(run_discovery_job_sync, job.id)
+    log_action(db, current_user.organisation_id, current_user.id, "start", "scraping_job", str(job.id), search_params)
     return job
 
 
@@ -67,7 +71,7 @@ def get_job(
 
 @router.post("/jobs/{job_id}/pause", response_model=DiscoveryJobResponse)
 def pause_job(
-    job_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    job_id: uuid.UUID, current_user: User = Depends(_MANAGE), db: Session = Depends(get_db)
 ):
     job = _get_owned_job(job_id, current_user, db)
     if job.status not in (JobStatus.RUNNING, JobStatus.PENDING):
@@ -75,6 +79,8 @@ def pause_job(
     job.status = JobStatus.PAUSED
     db.commit()
     db.refresh(job)
+
+    log_action(db, current_user.organisation_id, current_user.id, "pause", "scraping_job", str(job.id))
     return job
 
 
@@ -82,7 +88,7 @@ def pause_job(
 def resume_job(
     job_id: uuid.UUID,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
     job = _get_owned_job(job_id, current_user, db)
@@ -93,12 +99,13 @@ def resume_job(
     db.refresh(job)
 
     background_tasks.add_task(run_discovery_job_sync, job.id)
+    log_action(db, current_user.organisation_id, current_user.id, "resume", "scraping_job", str(job.id))
     return job
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=DiscoveryJobResponse)
 def cancel_job(
-    job_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    job_id: uuid.UUID, current_user: User = Depends(_MANAGE), db: Session = Depends(get_db)
 ):
     job = _get_owned_job(job_id, current_user, db)
     if job.status in (JobStatus.COMPLETED, JobStatus.CANCELLED, JobStatus.FAILED):
@@ -106,4 +113,6 @@ def cancel_job(
     job.status = JobStatus.CANCELLED
     db.commit()
     db.refresh(job)
+
+    log_action(db, current_user.organisation_id, current_user.id, "cancel", "scraping_job", str(job.id))
     return job

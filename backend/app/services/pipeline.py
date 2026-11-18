@@ -18,6 +18,7 @@ from app.models.core import CompanyProfile
 from app.models.jobs import JobStatus
 from app.models.leads import Lead, LeadClassification, LeadScore, LeadSource, LeadStatus, ResearchReport
 from app.services.agent_logging import track_agent_run
+from app.services.suppression import is_suppressed
 
 
 class PipelineError(RuntimeError):
@@ -78,6 +79,9 @@ async def research_lead(db: Session, lead: Lead) -> ResearchReport:
     lead.research_notes = extraction.could_not_extract_reason or None
     lead.status = LeadStatus.RESEARCHED
 
+    if is_suppressed(db, lead.organisation_id, lead.business_email):
+        lead.is_unsubscribed = True
+
     db.commit()
     db.refresh(report)
     return report
@@ -135,6 +139,8 @@ async def draft_email_for_lead(
         raise PipelineError(
             f"Lead is classified '{latest_score.classification.value}' — only hot/warm leads get drafted emails."
         )
+    if lead.is_unsubscribed:
+        raise PipelineError("Lead is unsubscribed — refusing to draft an email.")
 
     latest_report = (
         db.query(ResearchReport)

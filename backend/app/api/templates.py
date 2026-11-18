@@ -7,13 +7,16 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_role
 from app.db.session import get_db
-from app.models.core import User
+from app.models.core import User, UserRole
 from app.models.templates import EmailTemplate, TemplateCategory
 from app.schemas.template import TemplateCreate, TemplateResponse, TemplateUpdate
+from app.services.audit import log_action
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
+
+_MANAGE = require_role(UserRole.ADMIN, UserRole.MANAGER)
 
 
 def _get_owned_template(template_id: uuid.UUID, user: User, db: Session) -> EmailTemplate:
@@ -50,7 +53,7 @@ def list_templates(current_user: User = Depends(get_current_user), db: Session =
 @router.post("", response_model=TemplateResponse, status_code=201)
 def create_template(
     payload: TemplateCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
     category = _validate_category(payload.category)
@@ -64,6 +67,8 @@ def create_template(
     db.add(template)
     db.commit()
     db.refresh(template)
+
+    log_action(db, current_user.organisation_id, current_user.id, "create", "email_template", str(template.id))
     return template
 
 
@@ -80,9 +85,12 @@ def get_template(
 def update_template(
     template_id: uuid.UUID,
     payload: TemplateUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
+    if payload.is_approved is not None and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only an admin can approve/unapprove a template")
+
     template = _get_owned_template(template_id, current_user, db)
     updates = payload.model_dump(exclude_unset=True)
     if "category" in updates:
@@ -91,15 +99,22 @@ def update_template(
         setattr(template, field, value)
     db.commit()
     db.refresh(template)
+
+    audit_details = {k: (v.value if hasattr(v, "value") else v) for k, v in updates.items()}
+    log_action(
+        db, current_user.organisation_id, current_user.id, "update", "email_template", str(template.id), audit_details
+    )
     return template
 
 
 @router.delete("/{template_id}", status_code=204)
 def delete_template(
     template_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
     template = _get_owned_template(template_id, current_user, db)
     db.delete(template)
     db.commit()
+
+    log_action(db, current_user.organisation_id, current_user.id, "delete", "email_template", str(template_id))

@@ -13,13 +13,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.crypto import encrypt_token
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_admin
 from app.core.security import create_oauth_state_token, decode_oauth_state_token
 from app.db.session import get_db
 from app.models.core import User
 from app.models.integrations import Integration, IntegrationProvider, IntegrationStatus, OAuthToken
 from app.schemas.integration import AuthorizeUrlResponse, IntegrationResponse
 from app.services import gmail_service
+from app.services.audit import log_action
 from app.services.google_oauth import (
     GOOGLE_SCOPES,
     GoogleOAuthNotConfiguredError,
@@ -38,7 +39,7 @@ def list_integrations(current_user: User = Depends(get_current_user), db: Sessio
 
 
 @router.get("/google/authorize", response_model=AuthorizeUrlResponse)
-def google_authorize(current_user: User = Depends(get_current_user)):
+def google_authorize(current_user: User = Depends(require_admin)):
     state = create_oauth_state_token(str(current_user.organisation_id))
     try:
         return AuthorizeUrlResponse(authorize_url=build_authorize_url(state))
@@ -91,6 +92,8 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     token.is_revoked = False
     db.commit()
 
+    log_action(db, organisation_id, None, "connect", "integration", str(integration.id), {"email": account_email})
+
     frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
     return RedirectResponse(url=f"{frontend_url}/integrations?connected=1")
 
@@ -98,7 +101,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
 @router.post("/{integration_id}/disconnect", response_model=IntegrationResponse)
 def disconnect_integration(
     integration_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     integration = (
@@ -115,4 +118,6 @@ def disconnect_integration(
         token.is_revoked = True
     db.commit()
     db.refresh(integration)
+
+    log_action(db, current_user.organisation_id, current_user.id, "disconnect", "integration", str(integration.id))
     return integration

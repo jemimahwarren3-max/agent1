@@ -2,8 +2,17 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from app.core import rate_limit
 from app.core.config import settings
 from app.db.session import Base
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """The limiter in app/core/rate_limit.py is a module-level dict keyed by
+    client IP — TestClient always reports the same host, so without a reset
+    every test in the suite would share one bucket."""
+    rate_limit.reset()
 
 
 def _can_connect(url: str) -> bool:

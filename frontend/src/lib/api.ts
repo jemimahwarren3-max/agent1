@@ -38,10 +38,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ organisation_name, full_name, email, password }),
     }),
-  me: () => request<{ id: string; email: string; full_name: string; role: string }>("/api/auth/me"),
+  me: () => request<CurrentUser>("/api/auth/me"),
+  users: () => request<CurrentUser[]>("/api/auth/users"),
+  inviteUser: (payload: { email: string; full_name: string; password: string; role: string }) =>
+    request<CurrentUser>("/api/auth/users", { method: "POST", body: JSON.stringify(payload) }),
   leads: () => request<Lead[]>("/api/leads"),
   lead: (id: string) => request<Lead>(`/api/leads/${id}`),
-  companyProfile: () => request<Record<string, unknown>>("/api/company-profile"),
+  companyProfile: () => request<CompanyProfile>("/api/company-profile"),
+  updateCompanyProfile: (payload: Partial<CompanyProfile>) =>
+    request<CompanyProfile>("/api/company-profile", { method: "PATCH", body: JSON.stringify(payload) }),
 
   researchLead: (id: string) =>
     request<Record<string, unknown>>(`/api/leads/${id}/research`, { method: "POST" }),
@@ -98,10 +103,22 @@ export const api = {
     request<FollowUpTask>(`/api/follow-ups/${id}/cancel`, { method: "POST" }),
 
   campaigns: () => request<Campaign[]>("/api/campaigns"),
+  createCampaign: (payload: CampaignInput) =>
+    request<Campaign>("/api/campaigns", { method: "POST", body: JSON.stringify(payload) }),
+  updateCampaign: (id: string, payload: Partial<CampaignInput>) =>
+    request<Campaign>(`/api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  matchCampaignLeads: (id: string) =>
+    request<{ matched_count: number; skipped_suppressed_count: number }>(
+      `/api/campaigns/${id}/match-leads`,
+      { method: "POST" }
+    ),
+  campaignLeads: (id: string) => request<Lead[]>(`/api/campaigns/${id}/leads`),
 
   replies: () => request<EmailReply[]>("/api/replies"),
   syncReplies: (campaignId: string) =>
     request<EmailReply[]>(`/api/campaigns/${campaignId}/sync-replies`, { method: "POST" }),
+
+  auditLogs: () => request<AuditLogEntry[]>("/api/audit-logs"),
 };
 
 export type Lead = {
@@ -145,14 +162,60 @@ export type DiscoveryJob = {
   updated_at: string;
 };
 
+export type CompanyProfile = {
+  id: string;
+  company_name: string;
+  website: string;
+  description: string;
+  phone_numbers: string[];
+  services: string[];
+  target_industries: string[];
+  target_markets: string[];
+  outreach_messaging_notes: string;
+};
+
+export type CurrentUser = {
+  id: string;
+  email: string;
+  full_name: string;
+  role: "admin" | "manager" | "member";
+  organisation_id: string;
+};
+
+export type CampaignInput = {
+  name: string;
+  target_country?: string | null;
+  target_city?: string | null;
+  target_industry?: string | null;
+  email_template_id?: string | null;
+  integration_id?: string | null;
+  max_daily_sends: number;
+  follow_up_interval_days: number;
+  approval_mode: string;
+};
+
 export type Campaign = {
   id: string;
   name: string;
   target_country: string | null;
   target_city: string | null;
   target_industry: string | null;
+  email_template_id: string | null;
+  integration_id: string | null;
+  max_daily_sends: number;
+  follow_up_interval_days: number;
   stage: string;
   approval_mode: string;
+};
+
+export type AuditLogEntry = {
+  id: string;
+  actor_user_id: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  details: Record<string, unknown>;
+  created_at: string;
 };
 
 export type TemplateInput = {

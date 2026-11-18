@@ -9,7 +9,7 @@ on — the brief is explicit that a phase isn't "done" until that happens.
 | 2 | Google ADK agents (Discovery, Research, Qualification, Email Generation, Supervisor), Crawl4AI integration, Gemini wiring, agent-run logging, single-lead research/qualify/draft-email endpoints | **Done** |
 | 3 | Background discovery jobs (full discover→research→qualify pipeline) with pause/resume/cancel and domain dedup, discovery REST API, Discover Leads UI with live progress, Research Centre UI | **Done** |
 | 4 | Email template editor UI, Google OAuth (Gmail/Sheets/Drive), encrypted token storage, Gmail send/draft/reply monitoring, Email Management + Follow-up Agents | **Done** |
-| 5 | Campaign builder UI, approval queue UI, suppression-list enforcement end-to-end, rate limiting, role-based permissions, audit logging wired into every mutation | Not started |
+| 5 | Campaign builder UI, approval queue UI, suppression-list enforcement end-to-end, rate limiting, role-based permissions, audit logging wired into every mutation | **Done** |
 | 6 | Analytics dashboard wired to real DB aggregates, Recharts visualizations | Not started |
 | 7 | Full Playwright/Vitest coverage for the frontend, Cloud Run deployment config, production security checklist | Not started |
 
@@ -94,6 +94,53 @@ on — the brief is explicit that a phase isn't "done" until that happens.
   `google-genai` 2.33.0 both need `google-auth>=2.47`/`>=2.56` respectively, which the original
   pin predates. Verified the existing agent-builder tests still pass after the bump.
 
+## Phase 5 notes
+
+- Campaign builder (`app/api/campaigns.py`): `CampaignCreate`/`CampaignUpdate` now expose every
+  builder-relevant field the model already had (`lead_filters` column exists but still isn't read
+  by anything — matching uses `target_country`/`target_city`/`target_industry` directly, not the
+  JSON blob). `POST /{id}/match-leads` adds every lead matching those three fields that isn't
+  already in the campaign and isn't suppressed/unsubscribed, and is idempotent (re-running doesn't
+  double-add). `GET /{id}/leads` lists what matched. `approval_mode` is settable and validated but
+  not yet enforced anywhere — `automatic` doesn't actually skip the manual approve step in
+  `app/api/email_queue.py`; every send still goes through approve then send regardless of mode.
+- Approval queue UI (`/approvals`): awaiting-approval and approved-and-ready-to-send lists, wired
+  to the Phase 4 approve/reject/send endpoints. The endpoints themselves already existed; this
+  phase is what put a UI in front of them and locked them to admin/manager.
+- Suppression-list enforcement, actually end-to-end now: a shared `is_suppressed()`
+  (`app/services/suppression.py`) is checked at lead creation (already existed), research
+  (`pipeline.research_lead` now auto-unsubscribes a lead whose extracted email is suppressed),
+  drafting (`pipeline.draft_email_for_lead` refuses an unsubscribed lead), campaign matching
+  (skips and counts suppressed leads), and sending (already existed in Phase 4). Discovery-phase
+  lead creation has no email yet at that point, so there's nothing to check there — enforcement
+  happens as soon as an email exists.
+- Rate limiting, two separate things: (1) `app/core/rate_limit.py` — an in-memory, per-IP
+  fixed-window limiter (10 requests/60s) on `/api/auth/login` and `/api/auth/register`, the
+  brute-force/signup-spam surface. Single-process only, like the Phase 3 BackgroundTasks
+  limitation — a multi-process deployment needs this backed by Redis (configured via
+  `REDIS_URL`, still not wired to anything) instead of a module dict. (2) a per-campaign daily
+  send cap enforced in `email_sender.send_queued_email` against the existing `max_daily_sends`
+  column, counting `EmailLog` rows with `send_status="sent"` since midnight.
+- Role-based permissions: `require_role(*roles)` (`app/core/deps.py`) alongside the existing
+  `require_admin`. Content mutations (templates, campaigns, leads delete, email-queue
+  approve/reject/send, follow-up generate/cancel, discovery start/pause/resume/cancel) need
+  admin or manager; connecting/disconnecting the Google integration and inviting team members
+  are admin-only; approving/unapproving a template specifically needs admin even though editing
+  its content only needs manager. There was no way to create a non-admin user before this phase
+  (register always makes the first user admin) — added `POST /api/auth/users` (admin-only,
+  creates a user in the same org with a chosen role) and `GET /api/auth/users` so RBAC has
+  someone to restrict.
+- Audit logging (`app/services/audit.py`, `AuditLog` model — it existed since Phase 1 but nothing
+  wrote to it until now): one `log_action()` call per mutation across leads, templates, campaigns,
+  email-queue actions, follow-ups, integrations connect/disconnect, company profile updates,
+  discovery job start/pause/resume/cancel, and user invites. `GET /api/audit-logs` (admin-only)
+  surfaces it; `/settings` renders it alongside company profile editing and a team member
+  list/invite form (also new — there was previously no UI for either).
+- `/settings` and `/campaigns`/`/approvals` had stale `PageStub` phase labels left over from
+  before the Phase 5 renumbering (e.g. "Settings" said Phase 2, "Approval Queue" said Phase 6) —
+  not touched for any page still legitimately pending (`/agent` Phase 3, `/analytics` Phase 7
+  stubs are untouched since those phases are still ahead).
+
 ## Why Phase 1 stopped where it did
 
 The master prompt itself warns against generating all phases in one pass — "that will save you
@@ -118,13 +165,13 @@ now: the data model, auth, the editable company profile, and the dashboard shell
 3. Decide on a search provider for lead discovery (Google Programmable Search Engine is the
    default assumption; Bing/SerpAPI are viable swaps behind the same abstraction).
 
-## What to do before Phase 5
+## What to do before Phase 6
 
-Phase 4's code is real and tested (mocked Gmail/OAuth, real Postgres), but nothing in it has run
-against a live Google account yet — that needs the OAuth client from
+Phases 4 and 5's code is real and tested (mocked Gmail/OAuth, real Postgres), but nothing in
+either has run against a live Google account yet — that still needs the OAuth client from
 [GOOGLE_CLOUD_SETUP.md](GOOGLE_CLOUD_SETUP.md) provisioned and a real end-to-end click-through:
-connect a Google account on `/integrations`, send an approved email, reply to it from another
-inbox, and confirm `/inbox` picks up and classifies that reply. Phase 5 (campaign builder,
-approval queue UI, suppression enforcement, RBAC, audit logging) builds UI on top of the
-email-queue/follow-up endpoints Phase 4 added, so getting a real send/reply loop verified first
-will surface any Gmail-specific edge case before more UI gets built on top of it.
+connect a Google account on `/integrations`, build a campaign and match leads into it on
+`/campaigns`, approve and send a drafted email from `/approvals`, reply to it from another inbox,
+and confirm `/inbox` picks up and classifies that reply. Phase 6 (analytics dashboard) needs real
+send/reply/campaign data to chart against, so this click-through is also what gives it something
+real to aggregate instead of an empty database.

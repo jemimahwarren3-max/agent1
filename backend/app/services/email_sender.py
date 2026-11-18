@@ -17,6 +17,20 @@ class EmailSendError(RuntimeError):
     pass
 
 
+def _sent_today_count(db: Session, campaign_id) -> int:
+    today_start = datetime.datetime.combine(datetime.date.today(), datetime.time.min)
+    return (
+        db.query(EmailLog)
+        .join(EmailQueueItem, EmailLog.email_queue_id == EmailQueueItem.id)
+        .filter(
+            EmailQueueItem.campaign_id == campaign_id,
+            EmailLog.send_status == "sent",
+            EmailLog.created_at >= today_start,
+        )
+        .count()
+    )
+
+
 def schedule_follow_up(db: Session, campaign: Campaign, lead: Lead) -> FollowUpTask:
     scheduled_for = datetime.date.today() + datetime.timedelta(days=campaign.follow_up_interval_days)
     task = FollowUpTask(campaign_id=campaign.id, lead_id=lead.id, scheduled_for=scheduled_for)
@@ -44,6 +58,12 @@ def send_queued_email(db: Session, email_item: EmailQueueItem) -> EmailLog:
     campaign = db.get(Campaign, email_item.campaign_id)
     if campaign is None or campaign.integration_id is None:
         raise EmailSendError("Campaign has no connected Google integration to send through.")
+
+    sent_today = _sent_today_count(db, campaign.id)
+    if sent_today >= campaign.max_daily_sends:
+        raise EmailSendError(
+            f"Campaign has already sent its daily limit of {campaign.max_daily_sends} emails today."
+        )
 
     integration = db.get(Integration, campaign.integration_id)
     credentials = get_valid_credentials(db, integration)

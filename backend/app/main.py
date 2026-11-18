@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     agent_actions,
+    audit,
     auth,
     campaigns,
     company_profile,
@@ -39,3 +40,4 @@ app.include_router(integrations.router)
 app.include_router(email_queue.router)
 app.include_router(followups.router)
 app.include_router(replies.router)
+app.include_router(audit.router)

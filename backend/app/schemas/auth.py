@@ -28,3 +28,10 @@ class UserResponse(BaseModel):
     organisation_id: uuid.UUID
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class InviteUserRequest(BaseModel):
+    email: EmailStr
+    full_name: str
+    password: str
+    role: str = "member"

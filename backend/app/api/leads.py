@@ -3,13 +3,16 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_role
 from app.db.session import get_db
-from app.models.core import User
+from app.models.core import User, UserRole
 from app.models.leads import Lead, SuppressionListEntry
 from app.schemas.lead import LeadCreate, LeadResponse, LeadUpdate
+from app.services.audit import log_action
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
+
+_MANAGE = require_role(UserRole.ADMIN, UserRole.MANAGER)
 
 
 @router.get("", response_model=list[LeadResponse])
@@ -56,6 +59,8 @@ def create_lead(
     db.add(lead)
     db.commit()
     db.refresh(lead)
+
+    log_action(db, current_user.organisation_id, current_user.id, "create", "lead", str(lead.id))
     return lead
 
 
@@ -90,18 +95,21 @@ def update_lead(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(lead, field, value)
 
     db.commit()
     db.refresh(lead)
+
+    log_action(db, current_user.organisation_id, current_user.id, "update", "lead", str(lead.id), updates)
     return lead
 
 
 @router.delete("/{lead_id}", status_code=204)
 def delete_lead(
     lead_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_MANAGE),
     db: Session = Depends(get_db),
 ):
     lead = (
@@ -114,3 +122,5 @@ def delete_lead(
 
     db.delete(lead)
     db.commit()
+
+    log_action(db, current_user.organisation_id, current_user.id, "delete", "lead", str(lead_id))
